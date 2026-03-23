@@ -1,0 +1,6 @@
+pyrogram
+tgcrypto
+asyncio
+aiohttp
+GitPython
+psutil
