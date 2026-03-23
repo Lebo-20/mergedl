@@ -87,10 +87,27 @@ async def merge_callback(client, callback_query):
             shutil.rmtree(user_path)
         
     except Exception as e:
+        error_text = f"❌ Terjadi kesalahan: {str(e)}"
         if status:
-            await status.edit(f"❌ Terjadi kesalahan: {str(e)}")
+            await status.edit(error_text)
         else:
-            await client.send_message(user_id, f"❌ Terjadi kesalahan: {str(e)}")
+            await client.send_message(user_id, error_text)
+            
+    finally:
+        # Auto cleanup files ALWAYS (success or fail)
+        if os.path.exists(user_path):
+            try:
+                shutil.rmtree(user_path)
+            except:
+                pass
+        
+        # Clear status tracking from video handler (if module is loaded)
+        try:
+            from handlers.video import status_msgs
+            if user_id in status_msgs:
+                del status_msgs[user_id]
+        except:
+            pass
 
 @Client.on_message(filters.command("update") & filters.private)
 async def update_cmd(client, message):
