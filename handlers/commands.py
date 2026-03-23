@@ -29,7 +29,7 @@ async def clear_cmd(client, message):
 @Client.on_message(filters.command("merge") & filters.private)
 async def merge_cmd(client, message):
     user_id = message.from_user.id
-    user_path = os.path.join(DOWNLOAD_DIR, str(user_id))
+    user_path = os.path.abspath(os.path.join(DOWNLOAD_DIR, str(user_id)))
     
     if not os.path.exists(user_path) or not os.listdir(user_path):
         await message.reply_text("❌ Tidak ada video untuk digabung. Silakan kirim video terlebih dahulu.")
