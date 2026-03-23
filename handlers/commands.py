@@ -66,6 +66,11 @@ async def merge_cmd(client, message):
 
 @Client.on_message(filters.command("update") & filters.private)
 async def update_cmd(client, message):
+    from config import OWNER_ID
+    if message.from_user.id != OWNER_ID:
+        await message.reply_text("❌ Anda tidak memiliki izin untuk menggunakan perintah ini.")
+        return
+        
     msg = await message.reply_text("🌀 Memeriksa pembaruan...")
     try:
         process = await asyncio.create_subprocess_exec(
