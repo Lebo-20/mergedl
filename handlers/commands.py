@@ -21,7 +21,7 @@ async def start_cmd(client, message):
 @Client.on_message(filters.command("clear") & filters.private)
 async def clear_cmd(client, message):
     user_id = message.from_user.id
-    user_path = os.path.join(DOWNLOAD_DIR, str(user_id))
+    user_path = os.path.abspath(os.path.join(DOWNLOAD_DIR, str(user_id)))
     if os.path.exists(user_path):
         shutil.rmtree(user_path)
     await message.reply_text("✅ Sesi Anda telah dihapus.")
