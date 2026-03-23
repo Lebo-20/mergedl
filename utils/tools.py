@@ -64,7 +64,7 @@ def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower()
             for text in re.split('([0-9]+)', s)]
 
-async def merge_videos(input_dir, output_file):
+async def merge_videos(input_dir, output_file, use_watermark=False):
     # Absolute paths
     input_dir = os.path.abspath(input_dir)
     output_file = os.path.abspath(output_file)
@@ -94,20 +94,30 @@ async def merge_videos(input_dir, output_file):
             f.write(f"file '{escaped_path}'\n")
             
     # Debug: Print list.txt content
-    with open(list_file_path, 'r') as f:
-        print(f"DEBUG: list.txt content:\n{f.read()}")
+    if os.path.exists(list_file_path):
+        with open(list_file_path, 'r') as f:
+            print(f"DEBUG: list.txt content:\n{f.read()}")
             
-    # 5. FFmpeg command with Watermark (RE-ENCODING REQUIRED)
-    # Using libx264 with ultrafast preset for maximum speed
-    watermark_text = "@ShortTeamDl_bot"
-    cmd = [
-        'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
-        '-i', list_file_path,
-        '-vf', f"drawtext=text='{watermark_text}':fontcolor=white@0.4:fontsize=14:x=(w-text_w)/2:y=h-th-20",
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
-        '-c:a', 'copy',
-        output_file
-    ]
+    # 5. FFmpeg command
+    if use_watermark:
+        # With Watermark (RE-ENCODING REQUIRED)
+        watermark_text = "@ShortTeamDl_bot"
+        cmd = [
+            'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+            '-i', list_file_path,
+            '-vf', f"drawtext=text='{watermark_text}':fontcolor=white@0.4:fontsize=14:x=(w-text_w)/2:y=h-th-20",
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
+            '-c:a', 'copy',
+            output_file
+        ]
+    else:
+        # Standard Copy (NO RE-ENCODING, SUPER FAST)
+        cmd = [
+            'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+            '-i', list_file_path,
+            '-c', 'copy',
+            output_file
+        ]
     
     process = await asyncio.create_subprocess_exec(
         *cmd,
