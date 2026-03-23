@@ -65,14 +65,39 @@ def natural_sort_key(s):
             for text in re.split('([0-9]+)', s)]
 
 async def merge_videos(input_dir, output_file):
-    files = [f for f in os.listdir(input_dir) if f.endswith(('.mp4', '.mkv', '.mov', '.avi'))]
-    files.sort(key=natural_sort_key)
+    # Absolute paths
+    input_dir = os.path.abspath(input_dir)
+    output_file = os.path.abspath(output_file)
     
+    # 1. Scanning files correctly (Case-insensitive)
+    valid_extensions = ('.mp4', '.mkv', '.mov', '.avi')
+    files = [f for f in os.listdir(input_dir) if f.lower().endswith(valid_extensions)]
+    
+    # Debug: Print files found
+    print(f"DEBUG: Files found in {input_dir}: {files}")
+    
+    # 2. Validation
+    if not files:
+        raise Exception("❌ Tidak ada file video yang ditemukan untuk digabung.")
+    
+    # 3. Sorting (Natural sorting based on numbers)
+    files.sort(key=natural_sort_key)
+    print(f"DEBUG: Sorted files: {files}")
+    
+    # 4. Create list.txt with ABSOLUTE paths and single quotes
     list_file_path = os.path.join(input_dir, 'list.txt')
     with open(list_file_path, 'w', encoding='utf-8') as f:
         for file in files:
-            f.write(f"file '{file}'\n")
+            abs_video_path = os.path.join(input_dir, file)
+            # Escape single quotes in filenames if any
+            escaped_path = abs_video_path.replace("'", "'\\''")
+            f.write(f"file '{escaped_path}'\n")
             
+    # Debug: Print list.txt content
+    with open(list_file_path, 'r') as f:
+        print(f"DEBUG: list.txt content:\n{f.read()}")
+            
+    # 5. FFmpeg command using concat and absolute paths
     cmd = [
         'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
         '-i', list_file_path, '-c', 'copy', output_file
@@ -86,7 +111,9 @@ async def merge_videos(input_dir, output_file):
     stdout, stderr = await process.communicate()
     
     if process.returncode != 0:
-        raise Exception(f"FFmpeg failed: {stderr.decode()}")
+        error_msg = stderr.decode()
+        print(f"DEBUG: FFmpeg Error: {error_msg}")
+        raise Exception(f"FFmpeg failed (Return Code {process.returncode}):\n{error_msg}")
     
     return output_file
 
