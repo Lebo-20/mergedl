@@ -65,7 +65,7 @@ async def merge_cmd(client, message):
         ])
     )
 
-@Client.on_callback_query(filters.regex("^merge_"))
+@Client.on_callback_query(filters.regex("^(merge_|mset_)"))
 async def merge_callback(client, callback_query):
     user_id = callback_query.from_user.id
     data = callback_query.data
