@@ -249,7 +249,7 @@ async def start_merge_process(client, message, user_id):
 
         # Check if we need re-encoding or copy
         if sub_type == 'none' and not use_watermark:
-             await merge_videos(user_path, output_path, sub_type='none', preset=preset, crf=crf, use_watermark=False)
+             await merge_videos(user_path, output_path, sub_type='none', preset=preset, crf=crf, use_watermark=False, status_msg=status)
         else:
              await merge_videos(
                  user_path, output_path, 
@@ -257,7 +257,8 @@ async def start_merge_process(client, message, user_id):
                  sub_path=sub_path,
                  preset=preset,
                  crf=crf,
-                 use_watermark=use_watermark
+                 use_watermark=use_watermark,
+                 status_msg=status
              )
         
         # Determine actual output extension (softsub might have changed it to .mkv)

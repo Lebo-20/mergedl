@@ -64,7 +64,23 @@ def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower()
             for text in re.split('([0-9]+)', s)]
 
-async def merge_videos(input_dir, output_file, sub_type='none', sub_path=None, preset='veryfast', crf=22, use_watermark=False):
+async def get_video_duration(file_path):
+    cmd = [
+        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1', file_path
+    ]
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await process.communicate()
+    try:
+        return float(stdout.decode().strip())
+    except:
+        return 0
+
+async def merge_videos(input_dir, output_file, sub_type='none', sub_path=None, preset='veryfast', crf=22, use_watermark=False, status_msg=None):
     # Absolute paths
     input_dir = os.path.abspath(input_dir)
     output_file = os.path.abspath(output_file)
@@ -79,22 +95,25 @@ async def merge_videos(input_dir, output_file, sub_type='none', sub_path=None, p
     
     # 3. Sorting (Natural sorting based on numbers)
     files.sort(key=natural_sort_key)
+
+    # 4. Total Duration for progress bar
+    total_duration = 0
+    for file in files:
+        total_duration += await get_video_duration(os.path.join(input_dir, file))
     
-    # 4. Create list.txt with ABSOLUTE paths and single quotes
+    # 5. Create list.txt
     list_file_path = os.path.join(input_dir, 'list.txt')
     with open(list_file_path, 'w', encoding='utf-8') as f:
         for file in files:
             abs_video_path = os.path.join(input_dir, file)
-            # Escape single quotes in filenames if any
             escaped_path = abs_video_path.replace("'", "'\\''")
             f.write(f"file '{escaped_path}'\n")
             
-    # FFmpeg command building
-    cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt']
+    # 6. FFmpeg command building
+    cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt', '-progress', 'pipe:1']
     
     # Subtitle handling
     if sub_type != 'none' and sub_path and os.path.exists(sub_path):
-        # Move to input_dir if not there
         sub_filename = os.path.basename(sub_path)
         sub_dir = os.path.dirname(os.path.abspath(sub_path))
         if sub_dir != input_dir:
@@ -103,35 +122,18 @@ async def merge_videos(input_dir, output_file, sub_type='none', sub_path=None, p
             shutil.copy2(sub_path, temp_sub_path)
         
         if sub_type == 'hardsub':
-            # Burning subtitles
-            style = (
-                "Fontname=Standard Symbols PS,Fontsize=10,PrimaryColour=&H00FFFFFF,"
-                "BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=90,Bold=1"
-            )
-            # Use relative filename with escaped single quotes for filter
+            style = "Fontname=Standard Symbols PS,Fontsize=10,PrimaryColour=&H00FFFFFF,BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=90,Bold=1"
             sub_filename_escaped = sub_filename.replace("'", "\\'")
             vf_filters = [f"subtitles='{sub_filename_escaped}':force_style='{style}'"]
-            
             if use_watermark:
                 watermark_text = "@ShortTeamDl_bot"
                 vf_filters.append(f"drawtext=text='{watermark_text}':fontcolor=white@0.4:fontsize=14:x=(w-text_w)/2:y=h-th-20")
-            
             cmd.extend(['-vf', ",".join(vf_filters)])
-            cmd.extend([
-                '-c:v', 'libx264',
-                '-preset', preset,
-                '-crf', str(crf),
-                '-profile:v', 'high',
-                '-c:a', 'aac', '-b:a', '128k', '-ac', '2'
-            ])
+            cmd.extend(['-c:v', 'libx264', '-preset', preset, '-crf', str(crf), '-profile:v', 'high', '-c:a', 'aac', '-b:a', '128k', '-ac', '2'])
             
         elif sub_type == 'softsub':
-            # Softsubbing (Add as stream)
             cmd.extend(['-i', sub_filename])
-            
-            # Use MKV if output is MP4 but might not be compatible, or if user asked for MKV
             is_mkv = output_file.lower().endswith('.mkv')
-            
             if is_mkv:
                 cmd.extend(['-map', '0', '-map', '1:s', '-c', 'copy', '-c:s', 'srt'])
             else:
@@ -140,20 +142,12 @@ async def merge_videos(input_dir, output_file, sub_type='none', sub_path=None, p
                     cmd.extend(['-map', '0', '-map', '1:s', '-c', 'copy', '-c:s', 'ass'])
                 else:
                     cmd.extend(['-map', '0', '-map', '1:s', '-c', 'copy', '-c:s', 'mov_text'])
-    
     elif use_watermark:
-        # Watermark only (Re-encoding required)
         watermark_text = "@ShortTeamDl_bot"
-        cmd.extend([
-            '-vf', f"drawtext=text='{watermark_text}':fontcolor=white@0.4:fontsize=14:x=(w-text_w)/2:y=h-th-20",
-            '-c:v', 'libx264', '-preset', preset, '-crf', str(crf),
-            '-c:a', 'copy'
-        ])
+        cmd.extend(['-vf', f"drawtext=text='{watermark_text}':fontcolor=white@0.4:fontsize=14:x=(w-text_w)/2:y=h-th-20", '-c:v', 'libx264', '-preset', preset, '-crf', str(crf), '-c:a', 'copy'])
     else:
-        # Standard Copy (NO RE-ENCODING, SUPER FAST)
         cmd.extend(['-c', 'copy'])
 
-    # Ensure output path is absolute before running FFmpeg in cwd
     abs_output = os.path.abspath(output_file)
     cmd.append(abs_output)
     
@@ -163,6 +157,50 @@ async def merge_videos(input_dir, output_file, sub_type='none', sub_path=None, p
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
     )
+
+    # Monitor progress
+    start_time = time.time()
+    last_update = 0
+    
+    while True:
+        line = await process.stdout.readline()
+        if not line:
+            break
+        
+        line_str = line.decode().strip()
+        if line_str.startswith("out_time_ms="):
+            out_time_ms = int(line_str.split("=")[1])
+            processed_seconds = out_time_ms / 1000000.0
+            
+            if status_msg and total_duration > 0:
+                current_time = time.time()
+                # Update every 5 seconds to avoid flooding
+                if current_time - last_update > 5:
+                    percentage = (processed_seconds / total_duration) * 100
+                    percentage = min(percentage, 100) # Clamp to 100
+                    
+                    diff = current_time - start_time
+                    speed = processed_seconds / diff if diff > 0 else 0
+                    eta = (total_duration - processed_seconds) / speed if speed > 0 else 0
+                    
+                    progress_p = "[{0}{1}] \nP: {2}%\n".format(
+                        "".join([FINISHED_PROGRESS_STR for i in range(math.floor(percentage / 5))]),
+                        "".join([UNFINISHED_PROGRESS_STR for i in range(20 - math.floor(percentage / 5))]),
+                        round(percentage, 2))
+                        
+                    tmp = progress_p + "Time: {0} of {1}\nSpeed: {2}x\nETA: {3}\n".format(
+                        TimeFormatter(processed_seconds * 1000),
+                        TimeFormatter(total_duration * 1000),
+                        round(speed, 2),
+                        TimeFormatter(eta * 1000)
+                    )
+                    
+                    try:
+                        await status_msg.edit(f"🔄 **Sedang diproses...**\n{tmp}")
+                        last_update = current_time
+                    except:
+                        pass
+
     stdout, stderr = await process.communicate()
     
     if process.returncode != 0:
