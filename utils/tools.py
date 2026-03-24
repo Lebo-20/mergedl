@@ -127,7 +127,7 @@ async def merge_videos(input_dir, output_file, sub_type='none', sub_path=None, p
             vf_filters = [f"subtitles='{sub_filename_escaped}':force_style='{style}'"]
             if use_watermark:
                 watermark_text = "@ShortTeamDl_bot"
-                vf_filters.append(f"drawtext=text='{watermark_text}':fontcolor=white@0.4:fontsize=14:x=(w-text_w)/2:y=h-th-20")
+                vf_filters.append(f"drawtext=text='{watermark_text}':fontcolor=white@0.4:fontsize=20:x=(w-text_w)/2:y=h-th-20")
             cmd.extend(['-vf', ",".join(vf_filters)])
             cmd.extend(['-c:v', 'libx264', '-preset', preset, '-crf', str(crf), '-profile:v', 'high', '-c:a', 'aac', '-b:a', '128k', '-ac', '2'])
             
@@ -144,7 +144,7 @@ async def merge_videos(input_dir, output_file, sub_type='none', sub_path=None, p
                     cmd.extend(['-map', '0', '-map', '1:s', '-c', 'copy', '-c:s', 'mov_text'])
     elif use_watermark:
         watermark_text = "@ShortTeamDl_bot"
-        cmd.extend(['-vf', f"drawtext=text='{watermark_text}':fontcolor=white@0.4:fontsize=14:x=(w-text_w)/2:y=h-th-20", '-c:v', 'libx264', '-preset', preset, '-crf', str(crf), '-c:a', 'copy'])
+        cmd.extend(['-vf', f"drawtext=text='{watermark_text}':fontcolor=white@0.4:fontsize=20:x=(w-text_w)/2:y=h-th-20", '-c:v', 'libx264', '-preset', preset, '-crf', str(crf), '-c:a', 'copy'])
     else:
         cmd.extend(['-c', 'copy'])
 
