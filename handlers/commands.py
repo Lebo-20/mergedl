@@ -273,7 +273,7 @@ async def start_merge_process(client, message, user_id):
         await client.send_video(
             chat_id=user_id,
             video=actual_output,
-            caption=f"✅ **Proses Merge Selesai!**\n\nMetode: {sub_type.capitalize()}\nPreset: {preset}\nCRF: {crf}",
+            caption=f"✅ **Proses Merge Selesai!**\n\n📄 **Nama File:** `{os.path.basename(actual_output)}`\n🛠 **Metode:** {sub_type.capitalize()}\n⚡ **Preset:** {preset}\n💎 **CRF:** {crf}",
             supports_streaming=True
         )
         
