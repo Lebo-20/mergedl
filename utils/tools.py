@@ -64,7 +64,7 @@ def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower()
             for text in re.split('([0-9]+)', s)]
 
-async def merge_videos(input_dir, output_file, use_watermark=False):
+async def merge_videos(input_dir, output_file, sub_type='none', sub_path=None, preset='veryfast', crf=22, use_watermark=False):
     # Absolute paths
     input_dir = os.path.abspath(input_dir)
     output_file = os.path.abspath(output_file)
@@ -73,16 +73,12 @@ async def merge_videos(input_dir, output_file, use_watermark=False):
     valid_extensions = ('.mp4', '.mkv', '.mov', '.avi')
     files = [f for f in os.listdir(input_dir) if f.lower().endswith(valid_extensions)]
     
-    # Debug: Print files found
-    print(f"DEBUG: Files found in {input_dir}: {files}")
-    
     # 2. Validation
     if not files:
         raise Exception("❌ Tidak ada file video yang ditemukan untuk digabung.")
     
     # 3. Sorting (Natural sorting based on numbers)
     files.sort(key=natural_sort_key)
-    print(f"DEBUG: Sorted files: {files}")
     
     # 4. Create list.txt with ABSOLUTE paths and single quotes
     list_file_path = os.path.join(input_dir, 'list.txt')
@@ -93,34 +89,77 @@ async def merge_videos(input_dir, output_file, use_watermark=False):
             escaped_path = abs_video_path.replace("'", "'\\''")
             f.write(f"file '{escaped_path}'\n")
             
-    # Debug: Print list.txt content
-    if os.path.exists(list_file_path):
-        with open(list_file_path, 'r') as f:
-            print(f"DEBUG: list.txt content:\n{f.read()}")
+    # FFmpeg command building
+    cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt']
+    
+    # Subtitle handling
+    if sub_type != 'none' and sub_path and os.path.exists(sub_path):
+        # Move to input_dir if not there
+        sub_filename = os.path.basename(sub_path)
+        sub_dir = os.path.dirname(os.path.abspath(sub_path))
+        if sub_dir != input_dir:
+            temp_sub_path = os.path.join(input_dir, sub_filename)
+            import shutil
+            shutil.copy2(sub_path, temp_sub_path)
+        
+        if sub_type == 'hardsub':
+            # Burning subtitles
+            style = (
+                "Fontname=Standard Symbols PS,Fontsize=10,PrimaryColour=&H00FFFFFF,"
+                "BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=90,Bold=1"
+            )
+            # Use relative filename with escaped single quotes for filter
+            sub_filename_escaped = sub_filename.replace("'", "\\'")
+            vf_filters = [f"subtitles='{sub_filename_escaped}':force_style='{style}'"]
             
-    # 5. FFmpeg command
-    if use_watermark:
-        # With Watermark (RE-ENCODING REQUIRED)
+            if use_watermark:
+                watermark_text = "@ShortTeamDl_bot"
+                vf_filters.append(f"drawtext=text='{watermark_text}':fontcolor=white@0.4:fontsize=14:x=(w-text_w)/2:y=h-th-20")
+            
+            cmd.extend(['-vf', ",".join(vf_filters)])
+            cmd.extend([
+                '-c:v', 'libx264',
+                '-preset', preset,
+                '-crf', str(crf),
+                '-profile:v', 'high',
+                '-c:a', 'aac', '-b:a', '128k', '-ac', '2'
+            ])
+            
+        elif sub_type == 'softsub':
+            # Softsubbing (Add as stream)
+            cmd.extend(['-i', sub_filename])
+            
+            # Use MKV if output is MP4 but might not be compatible, or if user asked for MKV
+            is_mkv = output_file.lower().endswith('.mkv')
+            
+            if is_mkv:
+                cmd.extend(['-map', '0', '-map', '1:s', '-c', 'copy', '-c:s', 'srt'])
+            else:
+                if sub_filename.lower().endswith('.ass'):
+                    output_file = output_file.rsplit('.', 1)[0] + ".mkv"
+                    cmd.extend(['-map', '0', '-map', '1:s', '-c', 'copy', '-c:s', 'ass'])
+                else:
+                    cmd.extend(['-map', '0', '-map', '1:s', '-c', 'copy', '-c:s', 'mov_text'])
+    
+    elif use_watermark:
+        # Watermark only (Re-encoding required)
         watermark_text = "@ShortTeamDl_bot"
-        cmd = [
-            'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
-            '-i', list_file_path,
+        cmd.extend([
             '-vf', f"drawtext=text='{watermark_text}':fontcolor=white@0.4:fontsize=14:x=(w-text_w)/2:y=h-th-20",
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
-            '-c:a', 'copy',
-            output_file
-        ]
+            '-c:v', 'libx264', '-preset', preset, '-crf', str(crf),
+            '-c:a', 'copy'
+        ])
     else:
         # Standard Copy (NO RE-ENCODING, SUPER FAST)
-        cmd = [
-            'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
-            '-i', list_file_path,
-            '-c', 'copy',
-            output_file
-        ]
+        cmd.extend(['-c', 'copy'])
+
+    # Ensure output path is absolute before running FFmpeg in cwd
+    abs_output = os.path.abspath(output_file)
+    cmd.append(abs_output)
     
     process = await asyncio.create_subprocess_exec(
         *cmd,
+        cwd=input_dir,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
     )

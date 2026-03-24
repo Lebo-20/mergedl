@@ -27,6 +27,9 @@ async def clear_cmd(client, message):
         shutil.rmtree(user_path)
     await message.reply_text("✅ Sesi Anda telah dihapus.")
 
+# Store user states for multi-step process
+user_states = {}
+
 @Client.on_message(filters.command("merge") & filters.private)
 async def merge_cmd(client, message):
     user_id = message.from_user.id
@@ -36,12 +39,23 @@ async def merge_cmd(client, message):
         await message.reply_text("❌ Tidak ada video untuk digabung. Silakan kirim video terlebih dahulu.")
         return
         
+    user_states[user_id] = {
+        "sub_type": "none", 
+        "preset": "veryfast", 
+        "crf": "22", 
+        "output_name": f"merged_{user_id}.mp4",
+        "state": ""
+    }
+
     await message.reply_text(
         "Pilih metode Merge:",
         reply_markup=InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("Tanpa Watermark (Cepat)", callback_data="merge_no"),
-                InlineKeyboardButton("Pakai Watermark (Lambat)", callback_data="merge_yes")
+                InlineKeyboardButton("Copy (Cepat - Tanpa Sub)", callback_data="merge_copy"),
+                InlineKeyboardButton("Hardsub (Burn-in)", callback_data="merge_sub_hard")
+            ],
+            [
+                InlineKeyboardButton("Softsub (Pilih Track)", callback_data="merge_sub_soft")
             ]
         ])
     )
@@ -49,65 +63,167 @@ async def merge_cmd(client, message):
 @Client.on_callback_query(filters.regex("^merge_"))
 async def merge_callback(client, callback_query):
     user_id = callback_query.from_user.id
+    data = callback_query.data
+    
+    if user_id not in user_states:
+        user_states[user_id] = {
+            "sub_type": "none", 
+            "preset": "veryfast", 
+            "crf": "22", 
+            "output_name": f"merged_{user_id}.mp4",
+            "state": ""
+        }
+
+    if data == "merge_copy":
+        user_states[user_id]["sub_type"] = "none"
+        await ask_preset(client, callback_query.message, user_id)
+    elif data == "merge_sub_hard":
+        user_states[user_id]["sub_type"] = "hardsub"
+        await ask_subtitle(client, callback_query.message, user_id)
+    elif data == "merge_sub_soft":
+        user_states[user_id]["sub_type"] = "softsub"
+        await ask_subtitle(client, callback_query.message, user_id)
+    elif data.startswith("mset_preset_"):
+        user_states[user_id]["preset"] = data.split("_")[-1]
+        await ask_crf(client, callback_query.message, user_id)
+    elif data.startswith("mset_crf_"):
+        user_states[user_id]["crf"] = data.split("_")[-1]
+        await ask_filename(client, callback_query.message, user_id)
+    elif data == "mset_skip_sub":
+        await ask_preset(client, callback_query.message, user_id)
+
+async def ask_subtitle(client, message, user_id):
+    await message.edit(
+        "📂 **Silakan kirim file subtitle (.srt atau .ass)**\n\nPastikan format file benar.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Batal", callback_data="mset_skip_sub")]])
+    )
+    user_states[user_id]["state"] = "AWAIT_SUB"
+
+async def ask_preset(client, message, user_id):
+    await message.edit(
+        "⚙️ **Pilih Preset Encoding:**\nLower preset = Slower but better quality/smaller size",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Veryfast (Cepat)", callback_data="mset_preset_veryfast")],
+            [InlineKeyboardButton("Medium (Seimbang)", callback_data="mset_preset_medium")],
+            [InlineKeyboardButton("Slow (Terbaik / Lambat)", callback_data="mset_preset_slow")]
+        ])
+    )
+
+async def ask_crf(client, message, user_id):
+    await message.edit(
+        "💎 **Pilih Kualitas (CRF):**\nLower CRF = Higher quality, Larger file",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("20 (High)", callback_data="mset_crf_20"), 
+             InlineKeyboardButton("21", callback_data="mset_crf_21")],
+            [InlineKeyboardButton("22 (Medium)", callback_data="mset_crf_22"), 
+             InlineKeyboardButton("23 (Efficient)", callback_data="mset_crf_23")]
+        ])
+    )
+
+async def ask_filename(client, message, user_id):
+    await message.edit(
+        "📝 **Masukkan nama file output (tanpa ekstensi):**\nKetik 'default' untuk nama standar."
+    )
+    user_states[user_id]["state"] = "AWAIT_FILENAME"
+
+# Handler for text messages (to capture filename) and documents (for subtitles)
+@Client.on_message(filters.private & (filters.text | filters.document))
+async def state_handler(client, message):
+    user_id = message.from_user.id
+    if user_id not in user_states:
+        return
+    
+    state = str(user_states[user_id].get("state", ""))
+    if not state:
+        return
+    
+    if state == "AWAIT_SUB":
+        if message.document and (message.document.file_name.lower().endswith(('.srt', '.ass'))):
+            user_path = os.path.join(DOWNLOAD_DIR, str(user_id))
+            sub_path = os.path.join(user_path, message.document.file_name)
+            await message.download(sub_path)
+            user_states[user_id]["sub_path"] = sub_path
+            user_states[user_id]["state"] = ""
+            await ask_preset(client, message, user_id)
+        else:
+            await message.reply_text("❌ Mohon kirim file .srt atau .ass yang valid.")
+
+    elif state == "AWAIT_FILENAME":
+        filename = (message.text or "default").strip()
+        if filename.lower() != 'default':
+            # Sanitize filename
+            filename = "".join([c for c in filename if c.isalnum() or c in (' ', '.', '_', '-')]).strip()
+            if not filename:
+                filename = f"merged_{user_id}"
+            user_states[user_id]["output_name"] = f"{filename}.mp4"
+        
+        user_states[user_id]["state"] = ""
+        # Start the merge process after filename is set
+        await start_merge_process(client, message, user_id)
+
+async def start_merge_process(client, message, user_id):
+    status = await message.reply_text("⏳ Memulai proses merge... Harap tunggu.")
+    
     user_path = os.path.abspath(os.path.join(DOWNLOAD_DIR, str(user_id)))
-    use_watermark = callback_query.data == "merge_yes"
+    data = user_states[user_id]
     
-    await callback_query.message.delete()
-    status = await client.send_message(user_id, "⏳ Menggabungkan video... Harap tunggu.")
-    
-    output_file = f"merged_{user_id}.mp4"
-    output_path = os.path.join(user_path, output_file)
+    output_name = str(data["output_name"])
+    output_path = os.path.join(user_path, output_name)
     
     try:
-        await merge_videos(user_path, output_path, use_watermark=use_watermark)
-        
-        await status.edit("📤 Mengirim hasil gabungan ke Anda...")
-        
-        caption = "✅ File berhasil digabungkan!"
-        if use_watermark:
-            caption += "\n(Metode: Dengan Watermark)"
-        else:
-            caption += "\n(Metode: Copy/Tanpa Re-encode)"
+        sub_type = str(data["sub_type"])
+        preset = str(data["preset"])
+        crf = int(data["crf"])
+        sub_path = data.get("sub_path")
+        if sub_path:
+            sub_path = str(sub_path)
 
-        # Upload video
+        # Check if we need re-encoding or copy
+        if sub_type == 'none':
+             await merge_videos(user_path, output_path, sub_type='none', preset=preset, crf=crf)
+        else:
+             await merge_videos(
+                 user_path, output_path, 
+                 sub_type=sub_type, 
+                 sub_path=sub_path,
+                 preset=preset,
+                 crf=crf
+             )
+        
+        # Determine actual output extension (softsub might have changed it to .mkv)
+        actual_output = output_path
+        if not os.path.exists(actual_output):
+            mkv_path = output_path.rsplit('.', 1)[0] + ".mkv"
+            if os.path.exists(mkv_path):
+                actual_output = mkv_path
+
+        await status.edit("📤 Mengirim hasil ke Anda...")
+        
         await client.send_video(
             chat_id=user_id,
-            video=output_path,
-            caption=caption,
+            video=actual_output,
+            caption=f"✅ **Proses Merge Selesai!**\n\nMetode: {sub_type.capitalize()}\nPreset: {preset}\nCRF: {crf}",
             supports_streaming=True
         )
         
         # Optional: upload to git
-        await status.edit("📤 Mengupload ke GitHub...")
-        await upload_to_git(output_path)
-        
+        try:
+            await status.edit("📤 Mengupload ke repo...")
+            await upload_to_git(actual_output)
+        except: pass
+
         await status.delete()
-        # Auto cleanup
-        if os.path.exists(user_path):
-            shutil.rmtree(user_path)
         
     except Exception as e:
-        error_text = f"❌ Terjadi kesalahan: {str(e)}"
-        if status:
-            await status.edit(error_text)
-        else:
-            await client.send_message(user_id, error_text)
+        await status.edit(f"❌ Terjadi kesalahan: {str(e)}")
             
     finally:
-        # Auto cleanup files ALWAYS (success or fail)
+        # Cleanup
+        if user_id in user_states:
+            user_states.pop(user_id, None)
         if os.path.exists(user_path):
-            try:
-                shutil.rmtree(user_path)
-            except:
-                pass
-        
-        # Clear status tracking from video handler (if module is loaded)
-        try:
-            from handlers.video import status_msgs
-            if user_id in status_msgs:
-                del status_msgs[user_id]
-        except:
-            pass
+            try: shutil.rmtree(user_path)
+            except: pass
 
 @Client.on_message(filters.command("update") & filters.private)
 async def update_cmd(client, message):
