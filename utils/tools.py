@@ -96,10 +96,14 @@ async def merge_videos(input_dir, output_file, sub_type='none', sub_path=None, p
     # 3. Sorting (Natural sorting based on numbers)
     files.sort(key=natural_sort_key)
 
-    # 4. Total Duration for progress bar
-    total_duration = 0
-    for file in files:
-        total_duration += await get_video_duration(os.path.join(input_dir, file))
+    # 4. Total Duration for progress bar (PARALLEL PROBING for speed)
+    if status_msg:
+        try: await status_msg.edit(f"🔍 Memindai durasi {len(files)} file...")
+        except: pass
+        
+    tasks = [get_video_duration(os.path.join(input_dir, f)) for f in files]
+    durations = await asyncio.gather(*tasks)
+    total_duration = sum(durations)
     
     # 5. Create list.txt
     list_file_path = os.path.join(input_dir, 'list.txt')
