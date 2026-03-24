@@ -204,3 +204,41 @@ async def download_aria2(url, download_path):
     if process.returncode != 0:
         raise Exception(f"Aria2 failed: {stderr.decode()}")
     return download_path
+
+async def get_video_subtitles(file_path):
+    cmd = [
+        'ffprobe', '-v', 'error', '-select_streams', 's',
+        '-show_entries', 'stream=index,codec_name:stream_tags=language,title',
+        '-of', 'json', file_path
+    ]
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await process.communicate()
+    if process.returncode != 0:
+        return []
+    import json
+    try:
+        data = json.loads(stdout)
+        return data.get('streams', [])
+    except:
+        return []
+
+async def extract_subtitle(video_path, stream_index, output_format='srt'):
+    # Extract to a temp file in the same directory
+    output_path = video_path.rsplit('.', 1)[0] + f"_internal.{output_format}"
+    cmd = [
+        'ffmpeg', '-y', '-i', video_path,
+        '-map', f'0:{stream_index}', output_path
+    ]
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    await process.communicate()
+    if os.path.exists(output_path):
+        return output_path
+    return None

@@ -5,7 +5,7 @@ import sys
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import DOWNLOAD_DIR
-from utils.tools import merge_videos, upload_to_git
+from utils.tools import merge_videos, upload_to_git, get_video_subtitles, extract_subtitle, natural_sort_key
 
 @Client.on_message(filters.command("id") & filters.private)
 async def id_cmd(client, message):
@@ -101,15 +101,58 @@ async def merge_callback(client, callback_query):
     elif data == "mset_wm_no":
         user_states[user_id]["watermark"] = False
         await ask_filename(client, callback_query.message, user_id)
+    elif data.startswith("mset_ext_sub_"):
+        # Selected internal track to extract
+        stream_index = int(data.split("_")[-1])
+        user_path = os.path.join(DOWNLOAD_DIR, str(user_id))
+        valid_extensions = ('.mp4', '.mkv', '.mov', '.avi')
+        files = [f for f in os.listdir(user_path) if f.lower().endswith(valid_extensions)]
+        files.sort(key=natural_sort_key)
+        
+        if files:
+            video_path = os.path.join(user_path, files[0])
+            ext_msg = await callback_query.message.edit("⚙️ Sedang mengekstrak subtitle internal...")
+            sub_path = await extract_subtitle(video_path, stream_index)
+            if sub_path:
+                user_states[user_id]["sub_path"] = sub_path
+                user_states[user_id]["state"] = ""
+                await ask_preset(client, callback_query.message, user_id)
+            else:
+                await callback_query.answer("❌ Gagal mengekstrak subtitle.", show_alert=True)
+        else:
+            await callback_query.answer("❌ File video tidak ditemukan.", show_alert=True)
+
     elif data == "mset_skip_sub":
         user_states[user_id]["state"] = ""
         user_states[user_id]["sub_type"] = "none"
         await ask_preset(client, callback_query.message, user_id)
 
 async def ask_subtitle(client, message, user_id):
+    user_path = os.path.join(DOWNLOAD_DIR, str(user_id))
+    valid_extensions = ('.mp4', '.mkv', '.mov', '.avi')
+    files = [f for f in os.listdir(user_path) if f.lower().endswith(valid_extensions)]
+    files.sort(key=natural_sort_key)
+    
+    buttons = []
+    text = "📂 **Silakan kirim file subtitle (.srt atau .ass)**\n\nPastikan format file benar."
+    
+    if files:
+        video_path = os.path.join(user_path, files[0])
+        subs = await get_video_subtitles(video_path)
+        if subs:
+            text += "\n\nAtau **pilih subtitle internal** dari video:"
+            for stream in subs:
+                idx = stream.get('index')
+                lang = stream.get('tags', {}).get('language', 'und')
+                title = stream.get('tags', {}).get('title', f"Track {idx}")
+                codec = stream.get('codec_name', 'sub')
+                buttons.append([InlineKeyboardButton(f"🎬 {title} ({lang}/{codec})", callback_data=f"mset_ext_sub_{idx}")])
+
+    buttons.append([InlineKeyboardButton("Batal / Lewati", callback_data="mset_skip_sub")])
+
     await message.edit(
-        "📂 **Silakan kirim file subtitle (.srt atau .ass)**\n\nPastikan format file benar.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Batal", callback_data="mset_skip_sub")]])
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons)
     )
     user_states[user_id]["state"] = "AWAIT_SUB"
 
