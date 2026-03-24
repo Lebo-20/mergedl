@@ -43,6 +43,7 @@ async def merge_cmd(client, message):
         "sub_type": "none", 
         "preset": "veryfast", 
         "crf": "22", 
+        "watermark": False,
         "output_name": f"merged_{user_id}.mp4",
         "state": ""
     }
@@ -70,6 +71,7 @@ async def merge_callback(client, callback_query):
             "sub_type": "none", 
             "preset": "veryfast", 
             "crf": "22", 
+            "watermark": False,
             "output_name": f"merged_{user_id}.mp4",
             "state": ""
         }
@@ -88,6 +90,12 @@ async def merge_callback(client, callback_query):
         await ask_crf(client, callback_query.message, user_id)
     elif data.startswith("mset_crf_"):
         user_states[user_id]["crf"] = data.split("_")[-1]
+        await ask_watermark(client, callback_query.message, user_id)
+    elif data == "mset_wm_yes":
+        user_states[user_id]["watermark"] = True
+        await ask_filename(client, callback_query.message, user_id)
+    elif data == "mset_wm_no":
+        user_states[user_id]["watermark"] = False
         await ask_filename(client, callback_query.message, user_id)
     elif data == "mset_skip_sub":
         await ask_preset(client, callback_query.message, user_id)
@@ -120,6 +128,15 @@ async def ask_crf(client, message, user_id):
         ])
     )
 
+async def ask_watermark(client, message, user_id):
+    await message.edit(
+        "💧 **Tambahkan Watermark (@ShortTeamDl_bot)?**",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Ya", callback_data="mset_wm_yes"), 
+             InlineKeyboardButton("❌ Tidak", callback_data="mset_wm_no")]
+        ])
+    )
+
 async def ask_filename(client, message, user_id):
     await message.edit(
         "📝 **Masukkan nama file output (tanpa ekstensi):**\nKetik 'default' untuk nama standar."
@@ -131,10 +148,12 @@ async def ask_filename(client, message, user_id):
 async def state_handler(client, message):
     user_id = message.from_user.id
     if user_id not in user_states:
+        message.continue_propagation()
         return
     
     state = str(user_states[user_id].get("state", ""))
     if not state:
+        message.continue_propagation()
         return
     
     if state == "AWAIT_SUB":
@@ -146,7 +165,7 @@ async def state_handler(client, message):
             user_states[user_id]["state"] = ""
             await ask_preset(client, message, user_id)
         else:
-            await message.reply_text("❌ Mohon kirim file .srt atau .ass yang valid.")
+            message.continue_propagation() # Might be a video document?
 
     elif state == "AWAIT_FILENAME":
         filename = (message.text or "default").strip()
@@ -177,17 +196,19 @@ async def start_merge_process(client, message, user_id):
         sub_path = data.get("sub_path")
         if sub_path:
             sub_path = str(sub_path)
+        use_watermark = bool(data.get("watermark", False))
 
         # Check if we need re-encoding or copy
-        if sub_type == 'none':
-             await merge_videos(user_path, output_path, sub_type='none', preset=preset, crf=crf)
+        if sub_type == 'none' and not use_watermark:
+             await merge_videos(user_path, output_path, sub_type='none', preset=preset, crf=crf, use_watermark=False)
         else:
              await merge_videos(
                  user_path, output_path, 
                  sub_type=sub_type, 
                  sub_path=sub_path,
                  preset=preset,
-                 crf=crf
+                 crf=crf,
+                 use_watermark=use_watermark
              )
         
         # Determine actual output extension (softsub might have changed it to .mkv)

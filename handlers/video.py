@@ -22,6 +22,7 @@ async def video_handler(client, message):
     # Check if doc is video
     if message.document:
         if not (message.document.mime_type and message.document.mime_type.startswith("video/")):
+            message.continue_propagation()
             return # Ignore non-video documents
 
     # Initial status
@@ -86,6 +87,7 @@ async def cancel_rename(client, callback_query):
 async def rename_text_handler(client, message):
     user_id = message.from_user.id
     if user_id not in rename_states:
+        message.continue_propagation()
         return
     
     state = rename_states[user_id]
