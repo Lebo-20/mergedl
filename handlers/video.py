@@ -83,7 +83,7 @@ async def cancel_rename(client, callback_query):
     await callback_query.message.edit("❌ Rename dibatalkan. Gunakan /merge untuk lanjut.")
 
 # Handle text for renaming
-@Client.on_message(filters.private & filters.text & ~filters.command)
+@Client.on_message(filters.private & filters.text & ~filters.regex(r"^/"))
 async def rename_text_handler(client, message):
     user_id = message.from_user.id
     if user_id not in rename_states:

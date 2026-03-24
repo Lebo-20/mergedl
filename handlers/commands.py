@@ -144,7 +144,7 @@ async def ask_filename(client, message, user_id):
     user_states[user_id]["state"] = "AWAIT_FILENAME"
 
 # Handler for text messages (to capture filename) and documents (for subtitles)
-@Client.on_message(filters.private & (filters.text | filters.document) & ~filters.command)
+@Client.on_message(filters.private & (filters.text | filters.document) & ~filters.regex(r"^/"))
 async def state_handler(client, message):
     user_id = message.from_user.id
     if user_id not in user_states:
