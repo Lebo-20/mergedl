@@ -98,6 +98,8 @@ async def merge_callback(client, callback_query):
         user_states[user_id]["watermark"] = False
         await ask_filename(client, callback_query.message, user_id)
     elif data == "mset_skip_sub":
+        user_states[user_id]["state"] = ""
+        user_states[user_id]["sub_type"] = "none"
         await ask_preset(client, callback_query.message, user_id)
 
 async def ask_subtitle(client, message, user_id):
