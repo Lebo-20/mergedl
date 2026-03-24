@@ -7,6 +7,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import DOWNLOAD_DIR
 from utils.tools import merge_videos, upload_to_git
 
+@Client.on_message(filters.command("id") & filters.private)
+async def id_cmd(client, message):
+    await message.reply_text(f"🆔 **ID Telegram Anda:** `{message.from_user.id}`")
+
 @Client.on_message(filters.command("start") & filters.private)
 async def start_cmd(client, message):
     await message.reply_text(
