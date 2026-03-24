@@ -10,6 +10,7 @@ status_msgs = {}
 
 # Store state for renaming
 rename_states = {}
+filename_map = {} # Maps unique_id -> actual_filename
 
 @Client.on_message((filters.video | filters.document) & filters.private)
 async def video_handler(client, message):
@@ -43,10 +44,15 @@ async def video_handler(client, message):
         # Count files
         count = len([f for f in os.listdir(user_path) if f.lower().endswith(('.mp4', '.mkv', '.mov', '.avi'))])
         
+        # Use a short unique ID for callback to avoid 64-byte message limit
+        import uuid
+        file_id = uuid.uuid4().hex[:8]
+        filename_map[file_id] = orig_file_name
+
         status_text = f"✅ **Berhasil disimpan!**\n📄 Nama: `{orig_file_name}`\n📂 Total: `{count}` file\n\nKetik /merge jika sudah selesai."
         
         markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📝 Rename File Ini", callback_data=f"rename_{orig_file_name}")]
+            [InlineKeyboardButton("📝 Rename File Ini", callback_data=f"rn_{file_id}")]
         ])
 
         # Check if we should edit the PREVIOUS global status message or the CURRENT one
@@ -64,10 +70,15 @@ async def video_handler(client, message):
     except Exception as e:
         await status_msg.edit(f"❌ Gagal mendownload: {str(e)}")
 
-@Client.on_callback_query(filters.regex("^rename_"))
+@Client.on_callback_query(filters.regex("^rn_"))
 async def rename_callback(client, callback_query):
     user_id = callback_query.from_user.id
-    old_name = callback_query.data.replace("rename_", "")
+    file_id = callback_query.data.replace("rn_", "")
+    
+    old_name = filename_map.get(file_id)
+    if not old_name:
+        await callback_query.answer("❌ ID File kedaluwarsa. Silakan upload ulang atau hubungi admin.", show_alert=True)
+        return
     
     rename_states[user_id] = {"old_name": old_name, "msg_id": callback_query.message.id}
     
