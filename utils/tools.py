@@ -264,6 +264,144 @@ async def get_video_subtitles(file_path):
     except:
         return []
 
+async def extract_and_join_subtitles(input_dir, files, stream_index, status_msg=None):
+    import datetime
+    
+    valid_files = []
+    cumulative_duration = 0
+    final_content = []
+    sub_format = 'srt'
+    
+    for i, file in enumerate(files):
+        video_path = os.path.join(input_dir, file)
+        
+        # Determine format from first video
+        if i == 0:
+            subs = await get_video_subtitles(video_path)
+            for s in subs:
+                if s.get('index') == stream_index:
+                    sub_format = 'ass' if s.get('codec_name') == 'ass' else 'srt'
+                    break
+        
+        temp_name = f"temp_sub_{i}.{sub_format}"
+        temp_path = os.path.join(input_dir, temp_name)
+        
+        if status_msg:
+            try: await status_msg.edit(f"📥 Mengekstrak sub dari part {i+1}...")
+            except: pass
+            
+        cmd = ['ffmpeg', '-y', '-i', video_path, '-map', f'0:{stream_index}', temp_path]
+        process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await process.communicate()
+        
+        if os.path.exists(temp_path):
+            with open(temp_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            if sub_format == 'srt':
+                # Shift SRT
+                shifted = shift_srt(content, cumulative_duration)
+                final_content.append(shifted)
+            else:
+                # Shift ASS
+                shifted = shift_ass(content, cumulative_duration, i == 0)
+                final_content.append(shifted)
+                
+            os.remove(temp_path)
+            
+        duration = await get_video_duration(video_path)
+        cumulative_duration += duration
+
+    if not final_content:
+        return None
+        
+    final_sub_path = os.path.join(input_dir, f"internal_joined.{sub_format}")
+    with open(final_sub_path, 'w', encoding='utf-8') as f:
+        if sub_format == 'ass':
+            # Join ASS: First one contains header, others only events
+            f.write("\n".join(final_content))
+        else:
+            # Join SRT: Concat is fine
+            f.write("\n".join(final_content))
+            
+    return final_sub_path
+
+def shift_srt(content, offset_seconds):
+    if offset_seconds == 0:
+        return content
+    
+    def shift_match(match):
+        start = shift_srt_time(match.group(1), offset_seconds)
+        end = shift_srt_time(match.group(2), offset_seconds)
+        return f"{start} --> {end}"
+
+    pattern = r"(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})"
+    return re.sub(pattern, shift_match, content)
+
+def shift_srt_time(time_str, offset_seconds):
+    try:
+        h, m, s_ms = time_str.split(':')
+        s, ms = s_ms.split(',')
+        total_seconds = int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000.0
+        new_total = total_seconds + offset_seconds
+        
+        sh, rem = divmod(new_total, 3600)
+        sm, ss = divmod(rem, 60)
+        sms = (ss - int(ss)) * 1000
+        return f"{int(sh):02}:{int(sm):02}:{int(ss):02},{int(round(sms)):03}"
+    except:
+        return time_str
+
+def shift_ass(content, offset_seconds, is_first):
+    lines = content.split('\n')
+    new_lines = []
+    
+    if not is_first:
+        # Only keep [Events] section lines
+        in_events = False
+        for line in lines:
+            if line.strip().lower() == '[events]':
+                in_events = True
+                continue
+            if in_events and line.startswith('Dialogue:'):
+                new_lines.append(shift_ass_line(line, offset_seconds))
+        return "\n".join(new_lines)
+    else:
+        # Keep everything but shift times in Dialogue lines
+        for line in lines:
+            if line.startswith('Dialogue:'):
+                new_lines.append(shift_ass_line(line, offset_seconds))
+            else:
+                new_lines.append(line)
+        return "\n".join(new_lines)
+
+def shift_ass_line(line, offset_seconds):
+    if offset_seconds == 0:
+        return line
+    try:
+        parts = line.split(',', 9)
+        if len(parts) < 10: return line
+        
+        parts[1] = shift_ass_time(parts[1], offset_seconds) # Start
+        parts[2] = shift_ass_time(parts[2], offset_seconds) # End
+        return ",".join(parts)
+    except:
+        return line
+
+def shift_ass_time(time_str, offset_seconds):
+    try:
+        h, m, s_cs = time_str.split(':')
+        s, cs = s_cs.split('.')
+        total_seconds = int(h)*3600 + int(m)*60 + int(s) + int(cs)/100.0
+        new_total = total_seconds + offset_seconds
+        
+        sh, rem = divmod(new_total, 3600)
+        sm, ss = divmod(rem, 60)
+        scs = (ss - int(ss)) * 100
+        return f"{int(sh)}:{int(sm):02}:{int(ss):02}.{int(round(scs)):02}"
+    except:
+        return time_str
+
 async def extract_subtitle(video_path, stream_index, output_format='srt'):
     # Extract to a temp file in the same directory
     output_path = video_path.rsplit('.', 1)[0] + f"_internal.{output_format}"
